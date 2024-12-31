@@ -254,7 +254,7 @@ if __name__ == "__main__":
         prediction_length=prediction_length,
         context_length=context_length,
         cell_type="GRU",
-        input_size=input_size,
+        input_size=8,
         freq="H",  # <<< Needs to be constant, since this defines the input of the dataset!
         loss_type="l2",
         scaling=True,
