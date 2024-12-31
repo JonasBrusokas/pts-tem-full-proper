@@ -248,13 +248,15 @@ if __name__ == "__main__":
     if args.data_path in ["exchange_rate.csv", "weather.csv"]:
         print("Overriding input size for exchange_rate.csv and weather.csv")
         input_size = feature_count
+    print("OVERRIDING INPUT SIZE TO 8")
+    input_size = 8
 
     estimator = TimeGradEstimator(
         target_dim=target_dim,
         prediction_length=prediction_length,
         context_length=context_length,
         cell_type="GRU",
-        input_size=8,
+        input_size=input_size,
         freq="H",  # <<< Needs to be constant, since this defines the input of the dataset!
         loss_type="l2",
         scaling=True,
