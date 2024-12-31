@@ -37,7 +37,14 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def get_device():
-        if torch.backends.mps.is_available():
+
+        def mps_available():
+            try:
+                return torch.backends.mps.is_available()
+            except:
+                return False
+
+        if mps_available():
             print("MPS unsupported, using the CPU instead!")
             # return torch.device("cpu")
             return torch.device("cpu")
