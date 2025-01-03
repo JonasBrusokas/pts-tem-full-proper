@@ -11,6 +11,7 @@ from gluonts.evaluation.backtest import make_evaluation_predictions
 from pts import Trainer
 from pts.model.time_grad import TimeGradEstimator
 
+
 # %%
 if __name__ == "__main__":
     from utilz import *
@@ -226,7 +227,7 @@ if __name__ == "__main__":
         epochs = 2
         num_batches_per_epoch = 100
         num_forecast_samples = 10
-        prediction_limit = 10
+        prediction_limit = 1
         print(
             f"Settings overriden: epochs={epochs}, num_batches_per_epoch={num_batches_per_epoch}, num_forecast_samples={num_forecast_samples}, prediction_limit={prediction_limit}"
         )
@@ -278,10 +279,11 @@ if __name__ == "__main__":
     predictor = estimator.train(dataset_train, num_workers=NUM_WORKERS)
     print(f"Training complete!")
 
+
     # %%
     # Add prediction code
     def make_predictions(
-        predictor, test_df, context_length, prediction_length, set_name
+        predictor, test_df, context_length, prediction_length, set_name, part_idx=None, part_count=None,
     ):
         """
         Make predictions using a rolling window approach over the test set
@@ -296,7 +298,19 @@ if __name__ == "__main__":
 
         # Rolling window prediction
         before_loop = DateUtils.now()
-        for i in range(0, len(test_df) - context_length - prediction_length + 1):
+        start = 0
+        end = len(test_df) - context_length - prediction_length + 1
+        if (part_idx is not None) and (part_count is not None):
+            old_end = end
+            part_size = (end - start) // part_count
+            start = part_idx * part_size
+            end = (part_idx + 1) * part_size
+            if part_idx == part_count - 1:
+                end = len(test_df) - context_length - prediction_length + 1
+            print(f"Partitioned run: {part_idx}/{part_count} from {start} to {end}. Total: {old_end}")
+
+        actual_run = 0
+        for i in range(start, end):
             # Get context window
             context_window = test_df.iloc[i : i + context_length]
 
@@ -320,17 +334,61 @@ if __name__ == "__main__":
 
             if i % 10 == 0:
                 print(
-                    f"[{set}] Completed prediction {i}/{len(test_df) - context_length - prediction_length}. Took: {DateUtils.now() - before_loop}"
+                    f"[{set_name}] Completed prediction {i}/{len(test_df) - context_length - prediction_length}. Took: {DateUtils.now() - before_loop}"
                 )
             if (prediction_limit is not None and prediction_limit >= 0) and (
-                i >= prediction_limit
+                actual_run >= prediction_limit
             ):
                 print(
-                    f"[{set}] Prediction limit reached: {prediction_limit}. Took: {DateUtils.now() - before_loop}"
+                    f"[{set_name}] Prediction limit reached: {prediction_limit}. Took: {DateUtils.now() - before_loop}"
                 )
                 break
+            actual_run += 1
 
         return all_predictions, all_targets
+
+    def make_predictions_from_config(config):
+        predictor = config["predictor"]
+        test_df = config["test_df"]
+        context_length = config["context_length"]
+        prediction_length = config["prediction_length"]
+        set_name = config["set_name"]
+        return make_predictions(predictor, test_df, context_length, prediction_length, set_name)
+
+    def run_para_make_predictions(
+        predictor, test_df, context_length, prediction_length, set_name, num_of_workers=4,
+    ):
+        import multiprocessing
+        import time
+
+        experiment_configurations = [
+            {
+                "predictor": predictor,
+                "test_df": test_df,
+                "context_length": context_length,
+                "prediction_length": prediction_length,
+                "set_name": set_name,
+                "part_idx": experiment_idx,
+                "part_count": num_of_workers,
+            }
+            for experiment_idx in range(num_of_workers)
+        ]
+        print(f"Experiment configurations: {experiment_configurations}")
+
+        with multiprocessing.Pool(processes=num_of_workers) as pool:
+            async_result = pool.map_async(
+                make_predictions_from_config,
+                experiment_configurations,
+                error_callback=lambda error: print(f"!!! ERROR !!! {error}"),
+            )
+            while not async_result.ready():
+                time.sleep(5)
+
+            result = async_result.get()
+            pool.close()
+            pool.join()
+        return result, result
+
 
     def collect_predictions_and_targets(predictions, targets, prediction_length):
         predictions_sample_list = []
@@ -358,6 +416,15 @@ if __name__ == "__main__":
 
         return predictions_dict
 
+
+    # Serialization
+    # FileUtils.create_dir(f"./serialized_models")
+    # FileUtils.create_dir(f"./serialized_models/{experiment_uuid}")
+    # predictor.serialize(Path(f"./serialized_models/{experiment_uuid}"))
+    # predictor_clone = predictor.deserialize(Path(f"./serialized_models/{experiment_uuid}"), device=device)
+
+    # predictor = predictor.to(torch.device('cpu'))
+
     # >>> Make predictions on test set
     test_predictions, test_targets = make_predictions(
         predictor,
@@ -376,13 +443,43 @@ if __name__ == "__main__":
     print(test_agg_metrics)
 
     # >>> Make predictions on validation set
-    val_predictions, val_targets = make_predictions(
-        predictor,
-        val_data_df,
-        context_length=context_length,
-        prediction_length=prediction_length,
-        set_name="val",
-    )
+    try:
+        # val_predictions, val_targets = run_para_make_predictions(
+        #     predictor,
+        #     val_data_df,
+        #     context_length=context_length,
+        #     prediction_length=prediction_length,
+        #     set_name="val",
+        #     num_of_workers=4,
+        # )
+        val_predictions, val_targets = make_predictions(
+            predictor,
+            val_data_df,
+            context_length=context_length,
+            prediction_length=prediction_length,
+            set_name="val",
+        )
+        if (len(val_predictions) == 0) or (len(val_targets) == 0):
+            raise Exception("No predictions or targets!")
+    except Exception as e:
+        print("Exception has occurred while making predictions", e)
+        print("Fallback to 'train set'")
+        # val_predictions, val_targets = run_para_make_predictions(
+        #     predictor,
+        #     val_data_df,
+        #     context_length=context_length,
+        #     prediction_length=prediction_length,
+        #     set_name="val",
+        #     num_of_workers=4,
+        # )
+        val_predictions, val_targets = make_predictions(
+            predictor,
+            train_data_df[-len(train_data_df)//2:],
+            context_length=context_length,
+            prediction_length=prediction_length,
+            set_name="val",
+        )
+
     val_result_dict = collect_predictions_and_targets(
         val_predictions, val_targets, prediction_length
     )
