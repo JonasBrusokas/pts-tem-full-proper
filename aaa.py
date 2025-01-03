@@ -147,12 +147,24 @@ if __name__ == "__main__":
 
     train_data_df = full_data_df.iloc[: len(experiment_data.train_data)]
     val_data_df = full_data_df.iloc[
-        len(experiment_data.train_data) : len(experiment_data.train_data)
-        + len(experiment_data.val_data)
-    ]
+                  len(experiment_data.train_data): len(experiment_data.train_data)
+                                                   + len(experiment_data.val_data)
+                  ]
     test_data_df = full_data_df.iloc[
-        len(experiment_data.train_data) + len(experiment_data.val_data) :
-    ]
+                   len(experiment_data.train_data) + len(experiment_data.val_data):
+                   ]
+
+    # Shorten weather to run faster
+    if args.data_path == "weather.csv":
+        train_data_df = full_data_df.iloc[: len(experiment_data.train_data)//5]
+        val_data_df = full_data_df.iloc[
+            len(experiment_data.train_data) : len(experiment_data.train_data)
+            + len(experiment_data.val_data)//5
+        ]
+        test_data_df = full_data_df.iloc[
+            len(experiment_data.train_data) + len(experiment_data.val_data) : len(experiment_data.train_data) + len(experiment_data.val_data) + len(experiment_data.test_data)//5
+        ]
+
 
     def parse_freq(args):
         if args.data_path == "national_illness.csv":
@@ -227,7 +239,7 @@ if __name__ == "__main__":
         epochs = 2
         num_batches_per_epoch = 100
         num_forecast_samples = 10
-        prediction_limit = 1
+        prediction_limit = 5
         print(
             f"Settings overriden: epochs={epochs}, num_batches_per_epoch={num_batches_per_epoch}, num_forecast_samples={num_forecast_samples}, prediction_limit={prediction_limit}"
         )
@@ -249,8 +261,8 @@ if __name__ == "__main__":
     if args.data_path in ["exchange_rate.csv", "weather.csv"]:
         print("Overriding input size for exchange_rate.csv and weather.csv")
         input_size = feature_count
-    print("OVERRIDING INPUT SIZE TO 8")
-    input_size = 8
+    input_size = 8 if args.data_path != "weather.csv" else 8
+    print(f"OVERRIDING INPUT SIZE TO {input_size}")
 
     estimator = TimeGradEstimator(
         target_dim=target_dim,
@@ -258,7 +270,8 @@ if __name__ == "__main__":
         context_length=context_length,
         cell_type="GRU",
         input_size=input_size,
-        freq="H",  # <<< Needs to be constant, since this defines the input of the dataset!
+        # <<< Needs to be constant, since this defines the input of the dataset!
+        freq="H" if args.data_path != "weather.csv" else "H",
         loss_type="l2",
         scaling=True,
         diff_steps=100,
@@ -326,8 +339,12 @@ if __name__ == "__main__":
             )
 
             # Convert iterator to list to access predictions
-            forecasts = list(forecast_it)
-            targets = list(ts_it)
+            try:
+                forecasts = list(forecast_it)
+                targets = list(ts_it)
+            except Exception as e:
+                print(f"[{set_name}] Error making prediction idx={i}", e)
+                continue
 
             all_predictions.append(forecasts[0])
             all_targets.append(targets[0])
@@ -438,9 +455,13 @@ if __name__ == "__main__":
     )
 
     evaluator = Evaluator(quantiles=[0.1, 0.3, 0.5, 0.7, 0.9])
-    test_agg_metrics, test_item_metrics = evaluator(test_targets, test_predictions)
-    print("Test Aggregate metrics:")
-    print(test_agg_metrics)
+    try:
+        test_agg_metrics, test_item_metrics = evaluator(test_targets, test_predictions)
+        print("Test Aggregate metrics:")
+        print(test_agg_metrics)
+    except Exception as e:
+        test_agg_metrics, test_item_metrics = None, None
+        print("Error calculating test metrics", e)
 
     # >>> Make predictions on validation set
     try:
@@ -483,9 +504,17 @@ if __name__ == "__main__":
     val_result_dict = collect_predictions_and_targets(
         val_predictions, val_targets, prediction_length
     )
-    val_agg_metrics, val_item_metrics = evaluator(val_targets, val_predictions)
-    print("Validation Aggregate metrics:")
-    print(val_agg_metrics)
+    # val_agg_metrics, val_item_metrics = evaluator(val_targets, val_predictions)
+    try:
+        val_agg_metrics, val_item_metrics = evaluator(val_targets, val_predictions)
+        print("Val Aggregate metrics:")
+        print(test_agg_metrics)
+    except Exception as e:
+        val_agg_metrics, val_item_metrics = None, None
+        print("Error calculating test metrics", e)
+
+    # print("Validation Aggregate metrics:")
+    # print(val_agg_metrics)
 
     """
     What do I need to output? (for val, test)
