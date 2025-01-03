@@ -159,10 +159,10 @@ if __name__ == "__main__":
         train_data_df = full_data_df.iloc[: len(experiment_data.train_data)//5]
         val_data_df = full_data_df.iloc[
             len(experiment_data.train_data) : len(experiment_data.train_data)
-            + len(experiment_data.val_data)//5
+            + len(experiment_data.val_data)//50
         ]
         test_data_df = full_data_df.iloc[
-            len(experiment_data.train_data) + len(experiment_data.val_data) : len(experiment_data.train_data) + len(experiment_data.val_data) + len(experiment_data.test_data)//5
+            len(experiment_data.train_data) + len(experiment_data.val_data) : len(experiment_data.train_data) + len(experiment_data.val_data) + len(experiment_data.test_data)//50
         ]
 
 
